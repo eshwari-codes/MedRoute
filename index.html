@@ -1530,6 +1530,16 @@ input:focus,select:focus,textarea:focus,.auth-input:focus{border-color:rgba(47,1
 </div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+  <script>
+  const SUPABASE_URL = 'https://oazzpmrnonqfrxsyelof.supabase.co';
+  const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_urWWgnIMAZ5LmsXINLkI6g_jYY073Hb';
+
+  const supabaseClient = window.supabase.createClient(
+    SUPABASE_URL,
+    SUPABASE_PUBLISHABLE_KEY
+  );
+</script>
 <script>
 /* MedRoute V5 client + browser prototype data layer.
    Frontend: HTML5 + CSS3 + vanilla JavaScript + Leaflet.
