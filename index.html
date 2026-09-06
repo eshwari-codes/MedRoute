@@ -1843,7 +1843,40 @@ input:focus,select:focus,textarea:focus,.auth-input:focus{border-color:rgba(47,1
   function renderResources(){const cards=document.querySelectorAll('[data-page="resources"] .stat-card .stat-value');const role=currentRole(),n=myHospital(),h=db.hospitals[n];if(role==='hospital'&&h){const vals=[h.icu,h.oxygen,h.ventilators,db.ambulances.filter(a=>a.hospital===n&&a.status==='Available').length];vals.forEach((v,i)=>{if(cards[i])cards[i].textContent=v;});}else{const vals=[Object.values(db.hospitals).reduce((a,h)=>a+h.icu,0),Object.values(db.hospitals).reduce((a,h)=>a+h.oxygen,0),Object.values(db.hospitals).reduce((a,h)=>a+h.ventilators,0),db.ambulances.filter(a=>a.status==='Available').length];vals.forEach((v,i)=>{if(cards[i])cards[i].textContent=v;});}ensureResourceEditor();ensureHospitalNetworkPanels();}
   function renderBloodBank(){const tb=document.querySelector('.page-view[data-page="bloodbank"] tbody');if(!tb)return;tb.innerHTML=bloodGroups.map(g=>{const counts=Object.values(db.hospitals).reduce((a,h)=>{const s=h.blood[g];a[s]=(a[s]||0)+1;return a},{});const status=counts.Available?'Available':counts['Moderately Available']?'Moderately Available':counts.Low?'Low':'Not Available';return `<tr><td class="mono">${g}</td><td>${counts.Available||0} hospitals available</td><td>${counts['Moderately Available']||0} moderate · ${counts.Low||0} low</td><td><span class="chip-${status==='Available'?'accepting':status==='Low'?'oncall':status==='Not Available'?'full':'oncall'}">${status}</span></td></tr>`;}).join('');}
   function renderDoctors(){const tb=document.querySelector('.page-view[data-page="doctors"] tbody');if(!tb)return;tb.innerHTML=db.doctors.map(d=>`<tr><td>${esc(d.name)}</td><td>${esc(d.specialty)}</td><td>${esc(d.hospital)}</td><td><span class="chip-${d.status==='Available'?'accepting':d.status==='On-call'?'oncall':'full'}">${esc(d.status)}</span></td></tr>`).join('');ensureDoctorEditor();}
-  function renderHospitalCards(){document.querySelectorAll('.page-view[data-page="hospitals"] .panel').forEach((p,i)=>{const n=hospitalNames[i];const h=db.hospitals[n];if(!h)return;const vals=p.querySelectorAll('.detail-value');if(vals[0])vals[0].textContent=h.icu+' open';if(vals[1])vals[1].textContent=h.oxygen>0?'Available':'Not available';const info=p.querySelector('div[style*="font-size:12px"]');if(info)info.textContent=specialistSummary(n);});}
+function renderHospitalCards(){
+  const grid=document.querySelector('.page-view[data-page="hospitals"] .split-grid');
+  if(!grid)return;
+
+  const hospitals=Object.entries(db.hospitals);
+
+  grid.innerHTML=hospitals.map(([name,h])=>`
+    <div class="panel" style="padding:16px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;">
+        <div style="font-weight:700;font-size:14px;">${esc(name)}</div>
+        <span class="${h.accepting?'chip-accepting':'chip-full'}">
+          ${h.accepting?'EMERGENCY AVAILABLE':'NOT ACCEPTING'}
+        </span>
+      </div>
+
+      <div class="detail-grid" style="margin-bottom:10px;">
+        <div class="detail-card">
+          <div class="detail-label">ICU BEDS</div>
+          <div class="detail-value">${h.icu}</div>
+        </div>
+
+        <div class="detail-card">
+          <div class="detail-label">GENERAL BEDS</div>
+          <div class="detail-value">${h.oxygen}</div>
+        </div>
+      </div>
+
+      <div style="font-size:12px;color:var(--text-faint);line-height:1.6;">
+        ${h.phone ? '☎ '+esc(h.phone)+'<br>' : ''}
+        ${h.address ? '📍 '+esc(h.address) : ''}
+      </div>
+    </div>
+  `).join('');
+}
   function updateCounts(){const el=document.getElementById('statIcu');if(el)el.textContent=Object.values(db.hospitals).reduce((a,h)=>a+h.icu,0);const a=document.getElementById('statAmbulances');if(a)a.textContent=db.ambulances.filter(x=>x.status==='Available').length;}
   function refreshRouteForActiveEmergency(){const s=session();if(!s)return;const candidates=db.emergencies.filter(e=>e.createdBy===s.id&&!['cancelled'].includes(e.status));const e=candidates[candidates.length-1];if(e?.patient&&e?.hospital){const h=db.hospitals[e.hospital];if(h)getRoute(e.patient,[h.lat,h.lng],true).then(r=>{e.eta=r.mins+' min';e.route=r.geometry;save();renderEmergencies();}).catch(()=>{});}}
   function refreshAll(){refreshHospitalMarkers();refreshAmbulanceMarkers();renderEmergencies();renderHospitalTable();renderResources();renderBloodBank();renderDoctors();renderHospitalCards();renderAmbulances();updateCounts();renderNotifications();setTimeout(()=>map.invalidateSize(),100);}
