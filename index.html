@@ -6,7 +6,7 @@
 <title>MedRoute — Emergency Coordination Network</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" />
 <style>
   :root{
     --bg: #15181a;
@@ -1529,7 +1529,7 @@ input:focus,select:focus,textarea:focus,.auth-input:focus{border-color:rgba(47,1
   <span id="toastText">Ambulance dispatched to Sarvodaya Hospital.</span>
 </div>
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
   <script>
   const SUPABASE_URL = 'https://oazzpmrnonqfrxsyelof.supabase.co';
@@ -1670,7 +1670,30 @@ input:focus,select:focus,textarea:focus,.auth-input:focus{border-color:rgba(47,1
   document.getElementById('locateBtn')?.addEventListener('click',()=>{if(!navigator.geolocation)return mapStatus('GPS is not supported in this browser.',true);mapStatus('Requesting GPS location…');navigator.geolocation.getCurrentPosition(p=>setPatient(p.coords.latitude,p.coords.longitude,'Your current GPS location',true),()=>mapStatus('GPS permission was not granted.',true),{enableHighAccuracy:true,timeout:10000});});
   setTimeout(()=>map.invalidateSize(),300);window.addEventListener('resize',()=>map.invalidateSize());
   const mapWrap=document.getElementById('mapWrap'),backdrop=document.getElementById('mapBackdrop'),closeMap=document.getElementById('mapCloseBtn'),expandBtn=[...document.querySelectorAll('.link-btn')].find(x=>x.textContent.trim()==='Expand');
-  function expandMap(){mapWrap?.classList.add('map-expanded');backdrop?.classList.add('show');setTimeout(()=>map.invalidateSize(),120);}function closeExpandedMap(){mapWrap?.classList.remove('map-expanded');backdrop?.classList.remove('show');setTimeout(()=>map.invalidateSize(),120);}expandBtn?.addEventListener('click',expandMap);closeMap?.addEventListener('click',closeExpandedMap);backdrop?.addEventListener('click',closeExpandedMap);document.addEventListener('keydown',e=>{if(e.key==='Escape')closeExpandedMap();});
+  // Ancestor panels use backdrop-filter, which creates a CSS containing block for
+  // position:fixed descendants — so #mapWrap's "expanded" state would be trapped
+  // inside .panel instead of covering the viewport. Reparent to <body> while expanded
+  // to guarantee it escapes any filtered/transformed ancestor, then restore on close.
+  let mapWrapOriginalParent=null,mapWrapOriginalNext=null;
+  function expandMap(){
+    if(!mapWrap)return;
+    if(!mapWrap.classList.contains('map-expanded')){
+      mapWrapOriginalParent=mapWrap.parentNode;
+      mapWrapOriginalNext=mapWrap.nextSibling;
+      document.body.appendChild(mapWrap);
+    }
+    mapWrap.classList.add('map-expanded');backdrop?.classList.add('show');setTimeout(()=>map.invalidateSize(),120);
+  }
+  function closeExpandedMap(){
+    if(!mapWrap)return;
+    mapWrap.classList.remove('map-expanded');backdrop?.classList.remove('show');
+    if(mapWrapOriginalParent){
+      if(mapWrapOriginalNext)mapWrapOriginalParent.insertBefore(mapWrap,mapWrapOriginalNext);else mapWrapOriginalParent.appendChild(mapWrap);
+      mapWrapOriginalParent=null;mapWrapOriginalNext=null;
+    }
+    setTimeout(()=>map.invalidateSize(),120);
+  }
+  expandBtn?.addEventListener('click',expandMap);closeMap?.addEventListener('click',closeExpandedMap);backdrop?.addEventListener('click',closeExpandedMap);document.addEventListener('keydown',e=>{if(e.key==='Escape')closeExpandedMap();});
 
   // Role access
   const permissions={public:['dashboard','hospitals','settings'],dispatcher:['dashboard','emergencies','ambulances','hospitals','resources','bloodbank','doctors','analytics','settings'],hospital:['dashboard','hospitals','ambulances','resources','bloodbank','doctors','settings']};
@@ -2261,15 +2284,30 @@ function renderHospitalCards(){
 // Load hospitals from Supabase database
   async function loadSupabaseHospitals(){
     try{
-      const {data,error}=await supabaseClient
-        .from('hospitals')
-        .select('*')
-        .order('id');
+      // Deliberately using plain fetch() here instead of supabaseClient.from(...).
+      // Some sandboxed preview iframes (about:srcdoc) have no direct network access
+      // and proxy window.fetch to the parent frame via postMessage. The Supabase SDK
+      // builds its request headers as a Headers instance internally, and Headers
+      // objects cannot be structured-cloned — postMessage throws a DataCloneError
+      // before the request is even sent. A plain header object literal is cloneable
+      // and sidesteps the bug, while still hitting the same PostgREST endpoint.
+      const res=await fetch(
+        `${SUPABASE_URL}/rest/v1/hospitals?select=*&order=id`,
+        {headers:{apikey:SUPABASE_PUBLISHABLE_KEY,Authorization:`Bearer ${SUPABASE_PUBLISHABLE_KEY}`}}
+      );
 
-      if(error){
-        console.error('Supabase hospital error:',error);
+      if(!res.ok){
+        let detail='';
+        try{
+          const body=await res.json();
+          detail=[body.message,body.code&&`(code ${body.code})`,body.details,body.hint].filter(Boolean).join(' — ');
+        }catch(_){}
+        console.error('Supabase hospital error:',detail||`HTTP ${res.status}`);
+        mapStatus(`Live hospital sync failed: ${detail||`HTTP ${res.status}`}`,true);
         return;
       }
+
+      const data=await res.json();
 
       if(!Array.isArray(data)||data.length===0)return;
 
@@ -2299,7 +2337,16 @@ function renderHospitalCards(){
       console.log('Supabase hospitals loaded:',data.length);
 
     }catch(err){
-      console.error('Supabase connection error:',err);
+      // "Failed to fetch" (a bare TypeError, no HTTP status) means the request never
+      // completed at all — most commonly a sandboxed/embedded preview blocking
+      // outbound network calls, not a problem with the Supabase project itself.
+      // The app keeps working on local demo data either way; only live sync is skipped.
+      const isNetworkBlocked=err instanceof TypeError&&/failed to fetch/i.test(err?.message||'');
+      const msg=isNetworkBlocked
+        ? 'Live hospital sync unavailable in this preview (network blocked) — using offline demo data.'
+        : `Could not reach Supabase: ${err?.message||'network/CORS error'}`;
+      console.error('Supabase connection error:',err?.message||err);
+      mapStatus(msg,!isNetworkBlocked);
     }
   }
 
