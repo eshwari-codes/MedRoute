@@ -2225,7 +2225,54 @@ input:focus,select:focus,textarea:focus,.auth-input:focus{border-color:rgba(47,1
     if(mapWrap&&!document.getElementById('hospitalMapNetworkNote')){
       const n=document.createElement('div');n.id='hospitalMapNetworkNote';n.className='map-network-note';mapWrap.appendChild(n);
     }
+// Load hospitals from Supabase database
+  async function loadSupabaseHospitals(){
+    try{
+      const {data,error}=await supabaseClient
+        .from('hospitals')
+        .select('*')
+        .order('id');
 
+      if(error){
+        console.error('Supabase hospital error:',error);
+        return;
+      }
+
+      if(!Array.isArray(data)||data.length===0)return;
+
+      data.forEach(h=>{
+        if(!h.name)return;
+
+        db.hospitals[h.name]={
+          lat:Number(h.latitude)||0,
+          lng:Number(h.longitude)||0,
+          icu:Number(h.icu_beds)||0,
+          oxygen:Number(h.general_beds)||0,
+          ventilators:0,
+          accepting:h.emergency_available===true,
+          phone:h.phone||'',
+          address:h.address||'',
+          blood:{}
+        };
+
+        bloodGroups.forEach(g=>{
+          db.hospitals[h.name].blood[g]='Not Available';
+        });
+      });
+
+      save();
+      refreshAll();
+
+      console.log('Supabase hospitals loaded:',data.length);
+
+    }catch(err){
+      console.error('Supabase connection error:',err);
+    }
+  }
+
+  // Load live hospital database
+  loadSupabaseHospitals();
+    
     // Initial role-aware render.
     refreshAll();
 
